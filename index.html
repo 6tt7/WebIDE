@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro IDE - Multi-File Edition</title>
+
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/material-darker.min.css">
+
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/addon/edit/closebrackets.js"></script>
+
+    <!-- Pyodide JS -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #1e1e1e; --panel-color: #252526; --header-color: #333;
+            --border-color: #444; --text-color: #d4d4d4; --button-color: #0e639c;
+            --button-hover: #1177bb; --danger-color: #c93c3c;
+        }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background-color: var(--bg-color); color: var(--text-color); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background-color: var(--panel-color); border-bottom: 1px solid var(--header-color); }
+        .header-title { display: flex; align-items: center; gap: 15px; }
+        .header h1 { margin: 0; font-size: 1.5em; }
+        #current-project-name { font-size: 1.1em; color: #aaa; }
+        .controls { display: flex; align-items: center; gap: 15px; }
+        .ide-button { padding: 8px 16px; background-color: var(--button-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; transition: background-color 0.2s; }
+        .ide-button:hover:not(:disabled) { background-color: var(--button-hover); }
+        .ide-button:disabled { background-color: #5a5a5a; cursor: not-allowed; }
+        
+        .ide-body { display: flex; flex-grow: 1; overflow: hidden; }
+
+        /* File Explorer */
+        .file-explorer { width: 220px; background-color: var(--panel-color); padding: 10px; border-right: 1px solid var(--header-color); display: flex; flex-direction: column; }
+        .file-explorer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .file-explorer-header h3 { margin: 0; }
+        #new-file-btn { font-size: 1.2em; cursor: pointer; }
+        #file-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; }
+        #file-list li { padding: 8px 10px; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        #file-list li:hover { background-color: var(--header-color); }
+        #file-list li.active { background-color: var(--button-color); }
+        .delete-file-btn { color: var(--danger-color); visibility: hidden; }
+        #file-list li:hover .delete-file-btn { visibility: visible; }
+
+        .main-container { display: flex; flex-direction: column; flex-grow: 1; padding: 10px; overflow-y: auto; }
+        .io-container { display: flex; flex-direction: column; flex-grow: 1; gap: 10px; }
+        .window { display: flex; flex-direction: column; background-color: var(--panel-color); border: 1px solid var(--header-color); border-radius: 4px; overflow: hidden; }
+        .input-window { flex-basis: 60%; min-height: 300px; }
+        .output-window { flex-basis: 40%; min-height: 200px; }
+        .window-header { padding: 8px 12px; background-color: var(--header-color); font-weight: bold; border-bottom: 1px solid var(--border-color); }
+        .code-area, .output-area { flex-grow: 1; }
+        .CodeMirror { height: 100%; font-size: 16px; }
+        #output { padding: 12px; box-sizing: border-box; height: 100%; white-space: pre-wrap; word-wrap: break-word; font-family: 'Courier New', monospace; overflow-y: auto; color: #ccc; }
+
+        /* Modal Styles */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: var(--panel-color); padding: 25px; border-radius: 8px; width: 90%; max-width: 500px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .modal-content h2 { margin-top: 0; }
+        .modal-section { margin-bottom: 20px; }
+        #project-list { list-style: none; padding: 5px; margin: 0; max-height: 200px; overflow-y: auto; background: var(--bg-color); border-radius: 4px; }
+        #project-list li { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid var(--header-color); }
+        #new-project-controls { display: flex; flex-direction: column; gap: 10px; }
+        #new-project-controls div { display: flex; gap: 10px; }
+        #new-project-name, #project-type-select { flex-grow: 1; padding: 8px; background: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="header-title">
+            <h1>Pro IDE</h1>
+            <span id="current-project-name"></span>
+        </div>
+        <div class="controls">
+            <button id="project-hub-btn" class="ide-button">Project Hub</button>
+            <button id="run-button" class="ide-button">Run</button>
+        </div>
+    </div>
+
+    <div class="ide-body">
+        <div class="file-explorer">
+            <div class="file-explorer-header">
+                <h3>Files</h3>
+                <button id="new-file-btn" class="ide-button" title="New File">+</button>
+            </div>
+            <ul id="file-list"></ul>
+        </div>
+        <div class="main-container">
+            <div class="io-container">
+                <div class="window input-window">
+                    <div class="window-header" id="editor-header">Code Editor</div>
+                    <div class="code-area">
+                        <textarea id="code-input"></textarea>
+                    </div>
+                </div>
+                <div class="window output-window">
+                    <div class="window-header">Output</div>
+                    <div class="output-area">
+                        <pre id="output"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="project-hub-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button onclick="closeProjectHub()" style="float: right;">&times;</button>
+            <h2>Project Hub</h2>
+            <div class="modal-section">
+                <h3>Load Project</h3>
+                <ul id="project-list"></ul>
+            </div>
+            <div class="modal-section">
+                <h3>Create New Project</h3>
+                <div id="new-project-controls">
+                    <input type="text" id="new-project-name" placeholder="Enter new project name...">
+                    <div>
+                        <select id="project-type-select">
+                            <option value="html">HTML</option>
+                            <option value="python">Python</option>
+                            <option value="csharp">C#</option>
+                        </select>
+                        <button id="create-project-btn" class="ide-button">Create</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const editorHeader = document.getElementById('editor-header');
+        const runButton = document.getElementById('run-button');
+        const outputElement = document.getElementById('output');
+        const projectHubBtn = document.getElementById('project-hub-btn');
+        const projectHubModal = document.getElementById('project-hub-modal');
+        const projectList = document.getElementById('project-list');
+        const createProjectBtn = document.getElementById('create-project-btn');
+        const newProjectNameInput = document.getElementById('new-project-name');
+        const projectTypeSelect = document.getElementById('project-type-select');
+        const currentProjectNameEl = document.getElementById('current-project-name');
+        const fileListEl = document.getElementById('file-list');
+        const newFileBtn = document.getElementById('new-file-btn');
+
+        let pyodide = null;
+        let currentProjectName = null;
+        let activeFileName = null;
+        let projects = {};
+
+        const editor = CodeMirror.fromTextArea(document.getElementById('code-input'), {
+            lineNumbers: true, theme: 'material-darker', indentUnit: 4, autoCloseBrackets: true
+        });
+
+        const projectTemplates = {
+            html: {
+                language: 'html',
+                files: [
+                    { name: 'index.html', content: `<!DOCTYPE html>\n<html>\n<head>\n    <title>My Project</title>\n    <link rel="stylesheet" href="style.css">\n</head>\n<body>\n    <h1>Hello from HTML!</h1>\n    <p>Edit this text in index.html.</p>\n    <script src="script.js"><\/script>\n</body>\n</html>` },
+                    { name: 'style.css', content: `body {\n    font-family: sans-serif;\n    background-color: #f0f0f0;\n    color: #333;\n}` },
+                    { name: 'script.js', content: `console.log("Hello from script.js!");\n\n// This script is linked in index.html` }
+                ]
+            },
+            python: { language: 'python', files: [{ name: 'main.py', content: `# Welcome to Python!\n\nprint("Hello, World from Python!")` }] },
+            csharp: { language: 'csharp', files: [{ name: 'program.cs', content: `using System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine("Hello from program.cs!");\n    }\n}` }] }
+        };
+
+        function saveProjectsToStorage() { localStorage.setItem('pro-ide-projects', JSON.stringify(projects)); }
+        
+        function saveActiveFile() {
+            if (!currentProjectName || !activeFileName) return;
+            const file = projects[currentProjectName].files.find(f => f.name === activeFileName);
+            if (file) {
+                file.content = editor.getValue();
+                saveProjectsToStorage();
+            }
+        }
+
+        function loadProject(projectName) {
+            if (!projects[projectName]) {
+                currentProjectName = null; activeFileName = null;
+                currentProjectNameEl.textContent = '';
+                editor.setValue('No project loaded. Select one from the Project Hub.');
+                populateFileList();
+                return;
+            };
+            currentProjectName = projectName;
+            localStorage.setItem('pro-ide-last-project', projectName);
+            currentProjectNameEl.textContent = `| ${projectName}`;
+            const firstFile = projects[projectName].files[0]?.name || null;
+            loadFile(firstFile);
+            populateFileList();
+            closeProjectHub();
+        }
+
+        function createNewProject() {
+            const name = newProjectNameInput.value.trim();
+            if (!name) { alert("Please enter a project name."); return; }
+            if (projects[name]) { alert("A project with this name already exists."); return; }
+            const type = projectTypeSelect.value;
+            projects[name] = JSON.parse(JSON.stringify(projectTemplates[type]));
+            newProjectNameInput.value = '';
+            saveProjectsToStorage();
+            loadProject(name);
+        }
+
+        function deleteProject(projectName) {
+            if (!confirm(`Are you sure you want to delete "${projectName}"?`)) return;
+            delete projects[projectName];
+            saveProjectsToStorage();
+            populateProjectList();
+            if (currentProjectName === projectName) {
+                const projectNames = Object.keys(projects);
+                loadProject(projectNames[0] || null);
+            }
+        }
+
+        function loadFile(fileName) {
+            if (!currentProjectName) return;
+            const project = projects[currentProjectName];
+            const file = project.files.find(f => f.name === fileName);
+            if (!file) {
+                editor.setValue('');
+                activeFileName = null;
+                editorHeader.textContent = `Code Editor`;
+                return;
+            }
+            activeFileName = fileName;
+            editor.setValue(file.content);
+            editorHeader.textContent = `Code Editor (${fileName})`;
+            setEditorMode(fileName);
+            populateFileList();
+        }
+
+        function setEditorMode(fileName) {
+            if (!fileName) return;
+            const ext = fileName.split('.').pop();
+            let mode = 'text/plain';
+            if (ext === 'html') mode = 'htmlmixed';
+            else if (ext === 'css') mode = 'css';
+            else if (ext === 'js') mode = 'javascript';
+            else if (ext === 'py') mode = 'python';
+            else if (ext === 'cs') mode = 'text/x-csharp';
+            editor.setOption('mode', mode);
+        }
+
+        function addNewFile() {
+            if (!currentProjectName) return;
+            const fileName = prompt("Enter new file name (e.g., app.js, style.css):");
+            if (!fileName || fileName.trim() === '') return;
+            const project = projects[currentProjectName];
+            if (project.files.some(f => f.name === fileName)) {
+                alert("A file with this name already exists.");
+                return;
+            }
+            project.files.push({ name: fileName, content: '' });
+            saveProjectsToStorage();
+            loadFile(fileName);
+        }
+
+        function deleteFile(fileName, event) {
+            event.stopPropagation();
+            if (!currentProjectName || !confirm(`Delete "${fileName}"?`)) return;
+            const project = projects[currentProjectName];
+            project.files = project.files.filter(f => f.name !== fileName);
+            saveProjectsToStorage();
+            if (activeFileName === fileName) {
+                loadFile(project.files[0]?.name || null);
+            }
+            populateFileList();
+        }
+        
+        function populateProjectList() {
+            projectList.innerHTML = '';
+            const projectNames = Object.keys(projects);
+            if (projectNames.length === 0) {
+                projectList.innerHTML = '<li>No projects found. Create one below!</li>';
+                return;
+            }
+            projectNames.forEach(name => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <span class="project-name">${name}</span>
+                    <div class="actions">
+                        <button class="ide-button" onclick="loadProject('${name}')">Load</button>
+                        <button class="ide-button" onclick="deleteProject('${name}')" style="background-color:var(--danger-color);">Delete</button>
+                    </div>
+                `;
+                projectList.appendChild(li);
+            });
+        }
+        function populateFileList() {
+            fileListEl.innerHTML = '';
+            if (!currentProjectName || !projects[currentProjectName]) return;
+            projects[currentProjectName].files.forEach(file => {
+                const li = document.createElement('li');
+                li.textContent = file.name;
+                li.className = file.name === activeFileName ? 'active' : '';
+                li.onclick = () => loadFile(file.name);
+                const deleteBtn = document.createElement('span');
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.className = 'delete-file-btn';
+                deleteBtn.title = 'Delete File';
+                deleteBtn.onclick = (e) => deleteFile(file.name, e);
+                li.appendChild(deleteBtn);
+                fileListEl.appendChild(li);
+            });
+        }
+
+        function openProjectHub() { populateProjectList(); projectHubModal.style.display = 'flex'; }
+        function closeProjectHub() { projectHubModal.style.display = 'none'; }
+        
+        async function runCode() {
+            if (!currentProjectName) return;
+            const project = projects[currentProjectName];
+            outputElement.textContent = '';
+            
+            switch(project.language) {
+                case 'html': runHtmlProject(project); break;
+                case 'python': await runPythonProject(project); break;
+                case 'csharp': runCSharpProject(project); break;
+            }
+        }
+
+        // --- FIXED HTML EXECUTION ---
+        function runHtmlProject(project) {
+            let htmlFile = project.files.find(f => f.name.endsWith('.html'));
+            if (!htmlFile) {
+                outputElement.textContent = "Error: No .html file found in the project.";
+                return;
+            }
+            let content = htmlFile.content;
+
+            const cssLinks = content.match(/<link.*?rel="stylesheet".*?href="(.*?)".*?>/g) || [];
+            cssLinks.forEach(linkTag => {
+                const match = linkTag.match(/href="(.*?)"/);
+                if (!match) return;
+                const href = match[1];
+                const cssFile = project.files.find(f => f.name === href);
+                if (cssFile) {
+                    content = content.replace(linkTag, `<style>\n${cssFile.content}\n<\/style>`);
+                }
+            });
+
+            const scriptTags = content.match(/<script.*?src="(.*?)".*?><\/script>/g) || [];
+            scriptTags.forEach(scriptTag => {
+                const match = scriptTag.match(/src="(.*?)"/);
+                if (!match) return;
+                const src = match[1];
+                const jsFile = project.files.find(f => f.name === src);
+                if (jsFile) {
+                    content = content.replace(scriptTag, `<script>\n${jsFile.content}\n<\/script>`);
+                }
+            });
+
+            try {
+                const newWindow = window.open();
+                if (!newWindow || newWindow.closed || typeof newWindow.closed == 'undefined') {
+                     outputElement.textContent = "Error: Pop-up blocked! Please allow pop-ups for this site to run the HTML project.";
+                     return;
+                }
+                newWindow.document.write(content);
+                newWindow.document.close();
+            } catch (e) {
+                outputElement.textContent = "An error occurred while trying to open the new window.";
+            }
+        }
+            
+        async function runPythonProject(project) {
+            if (!pyodide) { outputElement.textContent = "Python environment is still loading..."; return; }
+            const pythonFile = project.files.find(f => f.name.endsWith('.py'));
+            if (!pythonFile) { outputElement.textContent = "No .py file found."; return; }
+            
+            runButton.disabled = true;
+            try {
+                pyodide.setStdout({ batched: (str) => { outputElement.textContent += str + "\n"; } });
+                await pyodide.runPythonAsync(pythonFile.content);
+            } catch (err) { outputElement.textContent += err.toString(); }
+            finally { pyodide.setStdout({}); runButton.disabled = false; }
+        }
+
+        function runCSharpProject(project) {
+            outputElement.textContent = "C# compilation is not supported.\nConcatenating all .cs files for review:\n\n" + "=".repeat(40) + "\n\n";
+            project.files.filter(f => f.name.endsWith('.cs')).forEach(file => {
+                outputElement.textContent += `// --- START: ${file.name} ---\n\n${file.content}\n\n// --- END: ${file.name} ---\n\n`;
+            });
+        }
+        
+        async function main() {
+            // Setup Pyodide
+            outputElement.textContent = "Initializing Python environment...";
+            runButton.disabled = true;
+            try {
+                pyodide = await loadPyodide();
+                outputElement.textContent = "Python environment is ready.";
+            } catch (error) { outputElement.textContent = "Failed to load Python: " + error; }
+            runButton.disabled = false;
+            
+            const storedProjects = localStorage.getItem('pro-ide-projects');
+            projects = storedProjects ? JSON.parse(storedProjects) : {};
+
+            if (Object.keys(projects).length === 0) {
+                projects['HTML Demo Project'] = JSON.parse(JSON.stringify(projectTemplates.html));
+                projects['Python Demo Project'] = JSON.parse(JSON.stringify(projectTemplates.python));
+                saveProjectsToStorage();
+            }
+
+            const lastProject = localStorage.getItem('pro-ide-last-project');
+            loadProject(projects[lastProject] ? lastProject : Object.keys(projects)[0]);
+
+            // Event Listeners
+            editor.on('change', saveActiveFile);
+            runButton.addEventListener('click', runCode);
+            projectHubBtn.addEventListener('click', openProjectHub);
+            createProjectBtn.addEventListener('click', createNewProject);
+            newFileBtn.addEventListener('click', addNewFile);
+        }
+
+        document.addEventListener('DOMContentLoaded', main);
+    </script>
+</body>
+</html>
